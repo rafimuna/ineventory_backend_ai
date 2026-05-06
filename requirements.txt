@@ -13,3 +13,4 @@ numpy
 joblib
 prophet
 gunicorn
+dj-database-url
