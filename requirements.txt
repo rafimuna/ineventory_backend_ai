@@ -1,0 +1,14 @@
+Django
+djangorestframework
+djangorestframework-simplejwt
+django-cors-headers
+psycopg2-binary
+python-dotenv
+drf-spectacular
+django-filter
+Pillow
+scikit-learn
+pandas
+numpy
+joblib
+prophet
