@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'inventory',
     'dashboard',
     'ml_service',
+    'pos',
 ]
 import os
 ML_MODELS_DIR = os.path.join(BASE_DIR, 'ml_models')
