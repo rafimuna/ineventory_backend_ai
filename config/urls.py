@@ -19,6 +19,7 @@ urlpatterns = [
     path('api/inventory/', include('inventory.urls')),
     path('api/dashboard/', include('dashboard.urls')),
     path('api/ml/', include('ml_service.urls')),
+    path('api/pos/', include('pos.urls')),
 ]
 
 # Development-এ static/media files serve করো

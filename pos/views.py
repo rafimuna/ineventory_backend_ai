@@ -1,64 +1,107 @@
-from rest_framework import status
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.views import APIView
-from decimal import Decimal
+from django.db import transaction
+from django.utils import timezone
+from .models import PaymentMethod, Order, OrderItem
+from .serializers import (
+    PaymentMethodSerializer, OrderListSerializer, OrderDetailSerializer,
+    OrderCreateSerializer, OrderUpdateSerializer
+)
 from products.models import Product
 from inventory.models import StockLog
+import random
+import string
 
-class POSCheckoutView(APIView):
+
+class PaymentMethodViewSet(viewsets.ReadOnlyModelViewSet):
+    """পেমেন্ট মাধ্যম - শুধু পড়ার জন্য"""
     permission_classes = [IsAuthenticated]
+    queryset = PaymentMethod.objects.filter(is_active=True)
+    serializer_class = PaymentMethodSerializer
 
-    def post(self, request):
-        data = request.data
-        cashier = request.user
-        items_data = data.get('items')
-        payment_method = data.get('payment_method')
-        discount = Decimal(data.get('discount', 0))
-        notes = data.get('notes', '')
 
-        # 1. ভ্যালিডেশন ও স্টক চেক
-        for item in items_data:
-            product = Product.objects.get(id=item['product_id'])
-            if product.quantity < item['quantity']: # StockLog ব্যবহার করে ইনভেন্টরি চেক
-                return Response({"error": f"{product.name} এর জন্য স্টক অপর্যাপ্ত"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 2. অর্ডার অবজেক্ট তৈরি ও সেভ
-        order = Order.objects.create(
-            order_number=self.generate_order_number(),
-            cashier=cashier,
-            discount=discount,
-            payment_method_id=payment_method,
-            notes=notes,
-            status='pending'
-        )
-
-        # 3. অর্ডার আইটেম যোগ করা ও স্টক হ্রাস করা
-        total, grand_total = 0, 0
-        for item in items_data:
-            product = Product.objects.get(id=item['product_id'])
-            price = product.price
-            quantity = item['quantity']
-            OrderItem.objects.create(order=order, product=product, quantity=quantity, price=price)
-
-            # ইনভেন্টরি আপডেট (StockLog তৈরি)
-            StockLog.objects.create(
-                product=product,
-                quantity_change=-quantity,  # এটাই মূল কৌশল
-                reason='sale',
-                created_by=cashier
-            )
-            total += price * quantity
-
-        grand_total = total - discount
-        order.total_amount = total
-        order.grand_total = grand_total
-        order.status = 'completed'
+class OrderViewSet(viewsets.ModelViewSet):
+    """অর্ডার ম্যানেজমেন্ট"""
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        queryset = Order.objects.select_related('cashier', 'payment_method')
+        
+        # ফিল্টারিং
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        date_filter = self.request.query_params.get('date')
+        if date_filter:
+            queryset = queryset.filter(order_date__date=date_filter)
+        
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(order_number__icontains=search)
+        
+        return queryset.order_by('-order_date')
+    
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return OrderListSerializer
+        elif self.action == 'retrieve':
+            return OrderDetailSerializer
+        elif self.action == 'create':
+            return OrderCreateSerializer
+        elif self.action == 'update' or self.action == 'partial_update':
+            return OrderUpdateSerializer
+        return OrderListSerializer
+    
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save(cashier=request.user)
+        
+        # OrderDetailSerializer দিয়ে রেসপন্স পাঠাও
+        detail_serializer = OrderDetailSerializer(order)
+        return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['patch'])
+    def update_status(self, request, pk=None):
+        """অর্ডারের স্ট্যাটাস আপডেট"""
+        order = self.get_object()
+        new_status = request.data.get('status')
+        
+        if new_status not in dict(Order.ORDER_STATUS):
+            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        order.status = new_status
         order.save()
+        
+        return Response({'status': order.status, 'message': f'Order {new_status}'})
 
-        return Response({"message": "Order completed!", "order_id": order.id}, status=status.HTTP_201_CREATED)
 
-    def generate_order_number(self):
-        # একটি ইউনিক অর্ডার নম্বর জেনারেট করুন (যেমন, INv/2025/0001 ফরম্যাটে)
-        import time
-        return f"ORD-{int(time.time())}"
+class DailyReportViewSet(viewsets.ViewSet):
+    """দৈনিক সেলস রিপোর্ট"""
+    permission_classes = [IsAuthenticated]
+    
+    def list(self, request):
+        date = request.query_params.get('date', timezone.now().date())
+        
+        orders = Order.objects.filter(
+            order_date__date=date,
+            status='completed'
+        )
+        
+        total_orders = orders.count()
+        total_sales = orders.aggregate(total=models.Sum('grand_total'))['total'] or 0
+        total_items = OrderItem.objects.filter(order__in=orders).aggregate(
+            total=models.Sum('quantity')
+        )['total'] or 0
+        
+        return Response({
+            'date': date,
+            'total_orders': total_orders,
+            'total_sales': total_sales,
+            'total_items_sold': total_items,
+            'average_order_value': total_sales / total_orders if total_orders > 0 else 0
+        })
