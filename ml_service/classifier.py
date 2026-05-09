@@ -154,4 +154,10 @@ class CategoryClassifier:
         return suggestions
 
 # Global instance
-classifier = CategoryClassifier()
+classifier = None
+
+def get_classifier():
+        global classifier
+        if classifier is None:
+            classifier = CategoryClassifier()
+        return classifier
