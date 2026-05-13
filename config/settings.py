@@ -88,11 +88,11 @@ DEBUG = True
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 CORS_ALLOWED_ORIGINS = [
-    "https://aquamarine-brioche-588ecd.netlify.app/dashboard",  # আপনার Netlify URL
+    "https://aquamarine-brioche-588ecd.netlify.app",  # আপনার Netlify URL
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://aquamarine-brioche-588ecd.netlify.app/dashboard",
+    "https://aquamarine-brioche-588ecd.netlify.app",
 ]
 
 TEMPLATES = [
