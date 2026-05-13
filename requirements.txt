@@ -14,3 +14,4 @@ joblib
 prophet
 gunicorn
 dj-database-url
+whitenoise
